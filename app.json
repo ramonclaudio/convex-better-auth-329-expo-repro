@@ -5,7 +5,7 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "convexbetterauth329reproapp",
+    "scheme": "cba329repro",
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/expo.icon"

@@ -1,15 +1,23 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from 'expo-router';
-import { useColorScheme } from 'react-native';
+import { ConvexBetterAuthProvider } from "@convex-dev/better-auth/react";
+import { ConvexReactClient } from "convex/react";
+import { Stack } from "expo-router";
+import { useMemo } from "react";
 
-import { AnimatedSplashOverlay } from '@/components/animated-icon';
-import AppTabs from '@/components/app-tabs';
+import { authClient } from "../../lib/auth-client";
+import { env } from "../../lib/env";
 
-export default function TabLayout() {
-  const colorScheme = useColorScheme();
-  return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <AnimatedSplashOverlay />
-      <AppTabs />
-    </ThemeProvider>
-  );
+export default function RootLayout() {
+	const client = useMemo(
+		() =>
+			new ConvexReactClient(env.convexUrl, {
+				unsavedChangesWarning: false,
+			}),
+		[],
+	);
+
+	return (
+		<ConvexBetterAuthProvider client={client} authClient={authClient}>
+			<Stack screenOptions={{ headerShown: false }} />
+		</ConvexBetterAuthProvider>
+	);
 }

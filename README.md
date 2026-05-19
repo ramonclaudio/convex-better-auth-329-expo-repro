@@ -1,56 +1,76 @@
-# Welcome to your Expo app 👋
+# convex-better-auth-329-repro
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Hit a bug where Convex queries threw `Invalid session ID` every time a Better Auth session rotated (`changePassword({ revokeOtherSessions: true })`). The provider's `fetchAccessToken` was holding onto the JWT bound to the deleted session for ~500-1500 ms. Filed [`get-convex/better-auth#329`](https://github.com/get-convex/better-auth/pull/329) to fix it. This repo is the runnable repro: real Expo app, real Convex deployment, real Better Auth session. Swap one line in `package.json` to flip between vanilla `0.12.2` (broken) and the patched build (fixed).
 
-## Get started
+Same app, same Convex deployment, same Better Auth session. Only the `@convex-dev/better-auth` version differs.
 
-1. Install dependencies
+## Setup
 
-   ```bash
-   npm install
-   ```
-
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+You need an iOS simulator (or device), Node 22+, and your own Convex deployment.
 
 ```bash
-npm run reset-project
+npm install
+echo 'EXPO_PUBLIC_CONVEX_URL=' > .env.local
+echo 'EXPO_PUBLIC_CONVEX_SITE_URL=' >> .env.local
+npx convex dev      # one terminal, creates a deployment, fills .env.local
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+On first `convex dev`, Convex will prompt you to log in and provision a deployment. After it finishes, set the Better Auth secret on the deployment env:
 
-### Other setup steps
+```bash
+npx convex env set BETTER_AUTH_SECRET "$(openssl rand -base64 32)"
+```
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+Then in another terminal:
 
-## Learn more
+```bash
+npm run ios
+```
 
-To learn more about developing your project with Expo, look at the following resources:
+## What the repro does
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+`src/app/index.tsx` mounts a single screen that:
 
-## Join the community
+1. Auto-signs-up `alice@test.com` on first launch, then signs in. Subsequent launches skip straight to sign-in.
+2. Displays the current Better Auth `sessionId`, the `useConvexAuth().isAuthenticated` state, and the result of a Convex query (`api.functions.me`) that throws if the request lacks a valid session.
+3. Has a big orange button: **Trigger session rotation**. Calls `authClient.changePassword({ revokeOtherSessions: true })`, which rotates the session id server-side.
+4. Tails a log of state transitions so you can see the brief Convex query failure window.
 
-Join our community of developers creating universal apps.
+With vanilla `0.12.2`: tap the button, the Convex query flickers to an error for ~500-1500 ms, then recovers when the provider eventually refreshes the token. The log shows the gap.
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+With the patched build: tap the button, the Convex query stays green. The provider drops the stale cached JWT inside the fetcher's synchronous prelude before the cache lookup, so the next `setAuth` reads a fresh token bound to the new session.
+
+## Toggle the fix
+
+The repo defaults to vanilla `0.12.2` (broken). To see the fix, swap one line in `package.json`:
+
+```jsonc
+// broken (vanilla npm)
+"@convex-dev/better-auth": "0.12.2"
+
+// fixed (patched build from PR #329)
+"@convex-dev/better-auth": "file:./patches/convex-dev-better-auth-0.12.2.tgz"
+```
+
+Then force-install so npm actually swaps the package:
+
+```bash
+npm install --force
+```
+
+Restart `npm run ios` for the change to land in the running app.
+
+## Why it happens
+
+The bug is in `@convex-dev/better-auth/src/react/index.tsx`. The provider's `fetchAccessToken` is wrapped in `useCallback(..., [sessionId])` and captures `cachedToken` lexically. When the session id rotates A → B:
+
+1. `useSession()` reports the new id.
+2. `useCallback` rebuilds `fetchAccessToken` with `sessionId = B`. The new closure captures `cachedToken` as it is at this render, which is still the pre-rotation JWT because the state setter from a sibling `useEffect` hasn't flushed yet.
+3. Convex's `ConvexAuthStateFirstEffect` (a CHILD component) fires its `useEffect([fetcher])` immediately. React fires child effects BEFORE parent effects, so the child reads the cache before any parent cleanup effect can clear it.
+4. The fetcher returns the stale JWT. Convex submits it. The backend's session lookup for `sessionA` fails. Every in-flight query throws `Invalid session ID` until Convex eventually retries with `forceRefreshToken: true`.
+
+The fix moves the rotation check into the fetcher's own synchronous prelude, before the cache lookup, and backs `cachedToken` with a ref so the fetcher reads the current value at call time. See [PR #329](https://github.com/get-convex/better-auth/pull/329) for the diff.
+
+## License
+
+MIT.
