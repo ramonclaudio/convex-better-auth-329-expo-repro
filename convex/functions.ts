@@ -9,14 +9,25 @@ import { authComponent } from "./auth";
 export const me = query({
 	args: {},
 	handler: async (ctx) => {
-		const user = await authComponent.getAuthUser(ctx);
-		if (!user) {
-			throw new Error("Not authenticated");
+		// Don't throw on unauth; return a sentinel so useQuery doesn't crash the
+		// component during the brief window when the cached JWT is stale.
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) {
+			return { email: null, id: null, now: Date.now(), authed: false };
 		}
-		return {
-			email: user.email,
-			id: user._id,
-			now: Date.now(),
-		};
+		try {
+			const user = await authComponent.getAuthUser(ctx);
+			return {
+				email: user?.email ?? identity.email ?? null,
+				id: identity.subject,
+				now: Date.now(),
+				authed: true,
+			};
+		} catch {
+			// authComponent.getAuthUser throws when the session referenced by the
+			// JWT no longer exists. This is exactly the bug — a stale JWT whose
+			// signature validates but whose session was deleted by the rotation.
+			return { email: null, id: null, now: Date.now(), authed: false };
+		}
 	},
 });

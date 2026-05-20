@@ -8,7 +8,8 @@ import { api } from "../../convex/_generated/api";
 
 type LogLine = { t: number; kind: "info" | "ok" | "err"; text: string };
 
-const TEST_EMAIL = "alice@test.com";
+// Fresh user every boot so accumulated DB state doesn't poison repeated runs.
+const TEST_EMAIL = `alice+${Date.now()}@test.com`;
 const PASSWORD_A = "passwordOriginalA1";
 const PASSWORD_B = "passwordRotatedB2";
 
@@ -32,26 +33,18 @@ export default function Repro() {
 		if (bootstrapped.current) return;
 		bootstrapped.current = true;
 		(async () => {
-			append("info", "bootstrapping test user…");
-			const signIn = await authClient.signIn.email({
+			append("info", `signing up ${TEST_EMAIL}…`);
+			const su = await authClient.signUp.email({
 				email: TEST_EMAIL,
 				password: PASSWORD_A,
+				name: "Alice",
 			});
-			if (signIn.error) {
-				append("info", "no existing user, signing up…");
-				const su = await authClient.signUp.email({
-					email: TEST_EMAIL,
-					password: PASSWORD_A,
-					name: "Alice",
-				});
-				if (su.error) {
-					append("err", `sign-up failed: ${su.error.message}`);
-					return;
-				}
-				append("ok", "signed up + auto-signed-in");
-			} else {
-				append("ok", "signed in");
+			if (su.error) {
+				append("err", `sign-up failed: ${su.error.message}`);
+				return;
 			}
+			append("ok", "signed up + auto-signed-in");
+			setPassword(PASSWORD_A);
 		})();
 	}, [append]);
 
@@ -81,13 +74,17 @@ export default function Repro() {
 				? "loading"
 				: me === null
 					? "null"
-					: `ok @ ${new Date(me.now).toLocaleTimeString()}`;
+					: me.authed
+						? `authed:${me.email}`
+						: "unauthed";
 		if (snapshot !== lastMeRef.current) {
 			lastMeRef.current = snapshot;
 			if (me === undefined) {
 				append("info", "Convex query: loading");
-			} else if (me) {
-				append("ok", `Convex query: returned ${me.email}`);
+			} else if (me?.authed) {
+				append("ok", `Convex query: authed as ${me.email}`);
+			} else if (me && !me.authed) {
+				append("err", "Convex query: UNAUTHED (stale JWT)");
 			}
 		}
 	}, [me, append]);
@@ -117,7 +114,9 @@ export default function Repro() {
 								? "loading…"
 								: me === null
 									? "null"
-									: `${me.email} (server ts ${me.now})`
+									: me.authed
+										? `✓ authed as ${me.email}`
+										: "✗ UNAUTHED (stale JWT)"
 						}
 					/>
 				</View>

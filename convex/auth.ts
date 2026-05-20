@@ -12,6 +12,7 @@ const authFunctions: AuthFunctions = internal.auth;
 
 export const authComponent = createClient<DataModel>(components.betterAuth, {
 	authFunctions,
+	triggers: {},
 });
 
 export const createAuth = (
@@ -25,9 +26,11 @@ export const createAuth = (
 		account: {
 			accountLinking: { enabled: true },
 		},
+		// Expo dev sends Origin: exp://<host>:<port>. Trust it so /change-password
+		// passes BA's origin check. Production apps would use the real scheme.
+		trustedOrigins: ["exp://", "cba329repro://"],
 		logger: { disabled: optionsOnly },
 		plugins: [convex({ authConfig }), expo()],
 	});
 
-export const { onCreate, onUpdate, onDelete } = authComponent.triggerApi();
-export const { isAuthenticated } = authComponent.authApi(createAuth);
+export const { onCreate, onDelete } = authComponent.triggersApi();

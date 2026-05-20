@@ -1,6 +1,8 @@
 {
-	"functions": "convex/",
-	"node": {
-		"externalPackages": ["better-auth", "@convex-dev/better-auth"]
-	}
+  "node": {
+    "externalPackages": [
+      "better-auth",
+      "@convex-dev/better-auth"
+    ]
+  }
 }
