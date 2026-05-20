@@ -2,7 +2,7 @@
 
 Convex queries throw `Invalid session ID` whenever a Better Auth session rotates (`changePassword({ revokeOtherSessions: true })`, cross-domain handoff, custom plugin endpoints that call `setSessionCookie`). The provider's `fetchAccessToken` holds onto the JWT bound to the deleted session. Filed [`get-convex/better-auth#329`](https://github.com/get-convex/better-auth/pull/329) to fix the React-layer state machine.
 
-This repo is the real-app reproduction: actual Expo app, actual Convex deployment, actual Better Auth session. Confirms the user-visible flicker exists, and shows the React-layer fix alone doesn't close it. The visible window is a Convex WebSocket race, same shape as [convex-js#82](https://github.com/get-convex/convex-js/issues/82).
+This repo is the real-app reproduction on the mobile stack: Expo + Convex + Better Auth. Confirms the user-visible flicker exists on iOS, and shows the React-layer fix alone doesn't close it. The visible window is a Convex WebSocket race, same shape as [convex-js#82](https://github.com/get-convex/convex-js/issues/82).
 
 ## Run
 
@@ -10,8 +10,7 @@ You need an iOS simulator (or device), Node 22+, and a Convex account.
 
 ```bash
 npm install
-echo 'EXPO_PUBLIC_CONVEX_URL=' > .env.local
-echo 'EXPO_PUBLIC_CONVEX_SITE_URL=' >> .env.local
+cp env.example .env.local
 npx convex dev    # one terminal, creates a deployment, fills .env.local
 npx convex env set BETTER_AUTH_SECRET "$(openssl rand -base64 32)"
 ```
@@ -48,7 +47,15 @@ npm install --force
 3. A "Trigger session rotation" button that calls `changePassword({ revokeOtherSessions: true })`.
 4. An event log of state transitions.
 
-In both vanilla and patched builds, tapping the button briefly flickers the Convex query to `UNAUTHED (stale JWT)` for ~500-1500 ms before recovery. The patched build runs the React-layer cache invalidation correctly (proven by the [unit-test repro](https://github.com/ramonclaudio/convex-better-auth-329-repro)), but the visible window persists because the Convex WebSocket race is independent of the React-layer cache. See [PR #329](https://github.com/get-convex/better-auth/pull/329) for the full investigation.
+In both vanilla and patched builds, tapping the button briefly flickers the Convex query to `UNAUTHED (stale JWT)` for ~500-1500 ms before recovery:
+
+```
+… · Convex query: UNAUTHED (stale JWT)
+… · Convex query: loading
+… · Convex query: authed as alice+…@test.com
+```
+
+The patched build runs the React-layer cache invalidation correctly (proven by the [unit-test repro](https://github.com/ramonclaudio/convex-better-auth-329-repro)), but the visible window persists because the Convex WebSocket race is independent of the React-layer cache. See [PR #329](https://github.com/get-convex/better-auth/pull/329) for the full investigation.
 
 ## Related
 
